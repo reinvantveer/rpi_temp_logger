@@ -1,24 +1,16 @@
 #!/usr/bin/env python
 
 import sqlite3
+
 import os
 import time
 import glob
-import json
-import urllib2
 
 # global variables
 speriod=(15*60)-1
 dbname='/var/www/templog.db'
-local_weather_station = 'Utrecht,nl'
 
-def get_local_temp():
-    weather_url = 'http://api.openweathermap.org/data/2.5/weather?units=metric&q=' + local_weather_station
-    jsondoc = urllib2.urlopen(weather_url).read()
-    local_weather_dict = json.loads(jsondoc)
-    local_temp = local_weather_dict['main']['temp']
-    print 'Local temperature:', local_temp
-    return local_temp
+
 
 # store the temperature in the database
 def log_temperature(temp):
@@ -26,7 +18,7 @@ def log_temperature(temp):
     conn=sqlite3.connect(dbname)
     curs=conn.cursor()
 
-    curs.execute("INSERT INTO temps values(datetime('now', '+2 hours'), (?), (?))", (temp, get_local_temp()))
+    curs.execute("INSERT INTO temps values(datetime('now'), (?))", (temp,))
 
     # commit the changes
     conn.commit()
@@ -49,62 +41,69 @@ def display_data():
 
 # get temerature
 # returns None on error, or the temperature as a float
-def get_temp(devicefile):
+def get_temp():
 
     try:
-        fileobj = open(devicefile,'r')
+        fileobj = open('/sys/class/thermal/thermal_zone0/temp','r')
         lines = fileobj.readlines()
         fileobj.close()
     except:
+	print 'There was an error reading /sys/class/thermal/thermal_zone0/temp'
         return None
 
     # get the status from the end of line 1 
-    status = lines[0][-4:-1]
+    #status = lines[0][-4:-1]
 
     # is the status is ok, get the temperature from line 2
-    if status=="YES":
-        print status
-        tempstr= lines[1][-6:-1]
+    if lines != None:
+        tempstr = lines[0][-6:-1]
+        print tempstr
         tempvalue=float(tempstr)/1000
         print tempvalue
-        return tempvalue
+        return round(tempvalue*2)/2
     else:
         print "There was an error."
         return None
 
-# main function: this is where the program starts 
+
+
+# main function
+# This is where the program starts 
 def main():
 
     # enable kernel modules
-    os.system('sudo modprobe w1-gpio')
-    os.system('sudo modprobe w1-therm')
+    #os.system('sudo modprobe w1-gpio')
+    #os.system('sudo modprobe w1-therm')
 
     # search for a device file that starts with 28
-    devicelist = glob.glob('/sys/bus/w1/devices/28*')
-    if devicelist=='':
-        return None
-    else:
+    #devicelist = glob.glob('/sys/bus/w1/devices/28*')
+    #if devicelist=='':
+    #    return None
+    #else:
         # append /w1slave to the device file
-        w1devicefile = devicelist[0] + '/w1_slave'
+        #w1devicefile = devicelist[0] + '/w1_slave'
+
 
 #    while True:
+
     # get the temperature from the device file
-    temperature = get_temp(w1devicefile)
+    temperature = get_temp()
     if temperature != None:
         print "temperature="+str(temperature)
     else:
         # Sometimes reads fail on the first attempt
         # so we need to retry
-        temperature = get_temp(w1devicefile)
+        temperature = get_temp()
         print "temperature="+str(temperature)
 
         # Store the temperature in the database
     log_temperature(temperature)
 
     # display the contents of the database
-	# display_data()
-	# time.sleep(speriod)
-    # get_local_temp()
+    display_data()
+
+#        time.sleep(speriod)
+
 
 if __name__=="__main__":
     main()

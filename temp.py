@@ -1,16 +1,19 @@
 #!/usr/bin/env python
+
 import sqlite3
 import sys
 import cgi
 import cgitb
+import urllib
+import urllib2
+import datetime
 
 # global variables
 speriod=(15*60)-1
 dbname='/var/www/templog.db'
 
 # get data from the database
-# if an interval is passed, 
-# return a list of records from the database
+# if an interval is passed, return a list of records from the database
 def get_data(interval):
     conn=sqlite3.connect(dbname)
     curs=conn.cursor()
@@ -18,7 +21,8 @@ def get_data(interval):
     if interval == None:
         curs.execute("SELECT * FROM temps")
     else:
-        curs.execute("SELECT * FROM temps WHERE timestamp>datetime('now','-%s hours')" % interval)
+        dt = datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        curs.execute("SELECT * FROM temps WHERE timestamp>datetime('now','-%s hours') AND temp != 'None'" % interval)
 #        curs.execute("SELECT * FROM temps WHERE timestamp>datetime('2013-09-19 21:30:02','-%s hours') AND timestamp<=datetime('2013-09-19 21:31:02')" % interval)
 
     rows=curs.fetchall()
@@ -39,20 +43,19 @@ def create_table(rows):
 
     return chart_table
 
-
 # print the javascript to generate the chart
 # pass the table generated from the database info
 def print_graph_script(table):
-
     # google chart snippet
     chart_code="""
     <script type="text/javascript" src="https://www.google.com/jsapi"></script>
+    <script type="text/javascript" src="http://code.jquery.com/jquery-2.1.1.min.js"></script>
     <script type="text/javascript">
       google.load("visualization", "1", {packages:["corechart"]});
       google.setOnLoadCallback(drawChart);
       function drawChart() {
         var data = google.visualization.arrayToDataTable([
-          ['Time', 'Temperature', 'Temperature De Bilt'],
+          ['Time', 'Temperature', 'Temperature Utrecht'],
 %s
         ]);
 
@@ -67,18 +70,9 @@ def print_graph_script(table):
 
     print chart_code % (table)
 
-
-
-
-# print the div that contains the graph
-def show_graph():
-    print "<h2>Temperature Chart</h2>"
-    print '<div id="chart_div" style="width: 900px; height: 500px;"></div>'
-
 # connect to the db and show some stats
 # argument option is the number of hours
 def show_stats(option):
-
     conn=sqlite3.connect(dbname)
     curs=conn.cursor()
 
@@ -106,27 +100,29 @@ def show_stats(option):
     print rowstrmax
     print "<h2>Average temperature</h2>"
     print "%.3f" % rowavg+"C"
+
     print "<hr>"
+
     print "<h2>In the last hour:</h2>"
     print "<table>"
     print "<tr><td><strong>Date/Time</strong></td><td><strong>Temperature</strong></td></tr>"
 
     rows=curs.execute("SELECT * FROM temps WHERE timestamp>datetime('new','-1 hour') AND timestamp<=datetime('new')")
-#    rows=curs.execute("SELECT * FROM temps WHERE timestamp>datetime('2013-09-19 21:30:02','-1 hour') AND timestamp<=datetime('2013-09-19 21:31:02')")
+    #rows=curs.execute("SELECT * FROM temps WHERE timestamp>datetime('2013-09-19 21:30:02','-1 hour') AND timestamp<=datetime('2013-09-19 21:31:02')")
     for row in rows:
         rowstr="<tr><td>{0}&emsp;&emsp;</td><td>{1}C</td></tr>".format(str(row[0]),str(row[1]))
         print rowstr
     print "</table>"
     print "<hr>"
-
     conn.close()
 
 def print_time_selector(option):
-    print """<form action="/cgi-bin/webgui.py" method="POST">
+    print """<form action="/cgi-bin/temp.py" method="POST">
         Show the temperature logs for  
         <select name="timeinterval">"""
 
     if option is not None:
+
         if option == "6":
             print "<option value=\"6\" selected=\"selected\">the last 6 hours</option>"
         else:
@@ -151,7 +147,6 @@ def print_time_selector(option):
         <input type="submit" value="Display">
     </form>"""
 
-
 # check that the option is valid
 # and not an SQL injection
 def validate_input(option_str):
@@ -165,19 +160,27 @@ def validate_input(option_str):
     else: 
         return None
 
-
-def main():
-    cgitb.enable()
-
+#return the option passed to the script
+def get_option():
     form=cgi.FieldStorage()
     if "timeinterval" in form:
         option = form["timeinterval"].value
-        option = validate_input (option)
+        return validate_input (option)
     else:
-        option = None
+        return None
 
-    # if option is None:
-        # option = str(24)
+# main function: this is where the program starts 
+def main():
+	# Enable CGI traceback module
+    cgitb.enable(format='text')
+
+    # get options that may have been passed to this script
+    option = get_option()
+
+    if option is None:
+        option = str(int(24)-2)
+    else:
+        option = int(str(option)) - 2
 
     # get data from the database
     records=get_data(option)
@@ -200,6 +203,7 @@ def main():
     print "    <title>"
     print "Raspberry Pi Temperature Logger"
     print "    </title>"
+    print '<meta http-equiv="Content-Type" content="text/html; charset=UTF-8" />'
     print_graph_script(table)
     print "</head>"
 
@@ -208,7 +212,11 @@ def main():
     print "<h1>Raspberry Pi Temperature Logger</h1>"
     print "<hr>"
     print_time_selector(option)
-    show_graph()
+	
+	# print the div that contains the graph
+    print "<h2>Temperature Chart</h2>"
+    print '<div id="chart_div" style="width: 900px; height: 500px;"></div>'
+    
     show_stats(option)
     print "</body>"
     print "</html>"
